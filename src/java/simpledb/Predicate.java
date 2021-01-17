@@ -16,7 +16,7 @@ public class Predicate implements Serializable {
         /**
          * Interface to access operations by integer value for command-line
          * convenience.
-         * 
+         *
          * @param i
          *            a valid integer Op index
          */
@@ -43,10 +43,14 @@ public class Predicate implements Serializable {
         }
 
     }
-    
+
+    private int fieldnum;
+    private Op op;
+    private Field field;
+
     /**
      * Constructor.
-     * 
+     *
      * @param field
      *            field number of passed in tuples to compare against.
      * @param op
@@ -55,7 +59,9 @@ public class Predicate implements Serializable {
      *            field value to compare passed in tuples to
      */
     public Predicate(int field, Op op, Field operand) {
-        // some code goes here
+        fieldnum = field;
+        this.op = op;
+        this.field = operand;
     }
 
     /**
@@ -63,8 +69,7 @@ public class Predicate implements Serializable {
      */
     public int getField()
     {
-        // some code goes here
-        return -1;
+        return fieldnum;
     }
 
     /**
@@ -72,32 +77,30 @@ public class Predicate implements Serializable {
      */
     public Op getOp()
     {
-        // some code goes here
-        return null;
+        return op;
     }
-    
+
     /**
      * @return the operand
      */
     public Field getOperand()
     {
-        // some code goes here
-        return null;
+        return field;
     }
-    
+
     /**
      * Compares the field number of t specified in the constructor to the
      * operand field specified in the constructor using the operator specific in
      * the constructor. The comparison can be made through Field's compare
      * method.
-     * 
+     *
      * @param t
      *            The tuple to compare against
      * @return true if the comparison is true, false otherwise.
      */
     public boolean filter(Tuple t) {
-        // some code goes here
-        return false;
+        Field one = t.getField(fieldnum);
+        return one.compare(op, field);
     }
 
     /**
@@ -105,7 +108,6 @@ public class Predicate implements Serializable {
      * operand_string"
      */
     public String toString() {
-        // some code goes here
-        return "";
+        return "f = "+ fieldnum +" op = "+ op.toString() +" operand = "+ field.toString();
     }
 }
