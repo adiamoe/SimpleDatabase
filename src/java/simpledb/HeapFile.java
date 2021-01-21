@@ -102,17 +102,46 @@ public class HeapFile implements DbFile {
     // see DbFile.java for javadocs
     public ArrayList<Page> insertTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
-        // some code goes here
-        return null;
-        // not necessary for lab1
+        BufferPool pool = Database.getBufferPool();
+        ArrayList<Page> pages = new ArrayList<>();
+        int tableId = getId();
+        int pid = 0;
+        for(; pid<numPages();++pid)
+        {
+            HeapPage pg = (HeapPage) pool.getPage(tid, new HeapPageId(tableId, pid), Permissions.READ_WRITE);
+            if(pg.getNumEmptySlots()>0)
+            {
+                pg.insertTuple(t);
+                pages.add(pg);
+                break;
+            }
+        }
+        if (pid == numPages())
+        {
+            HeapPageId newId = new HeapPageId(tableId, pid);
+            HeapPage newPage = new HeapPage(newId, HeapPage.createEmptyPageData());
+            writePage(newPage);
+            //通过bufferpool访问
+            HeapPage pg = (HeapPage) pool.getPage(tid, newId, Permissions.READ_WRITE);
+            pg.insertTuple(t);
+            pages.add(pg);
+        }
+        return pages;
     }
 
     // see DbFile.java for javadocs
     public ArrayList<Page> deleteTuple(TransactionId tid, Tuple t) throws DbException,
             TransactionAbortedException {
-        // some code goes here
-        return null;
-        // not necessary for lab1
+        BufferPool pool = Database.getBufferPool();
+        ArrayList<Page> pages = new ArrayList<>();
+        int tableId = getId();
+        PageId pageid = t.getRecordId().getPageId();
+        if(pageid.getPageNumber()>numPages())
+            throw new DbException("No such tuple!");
+        HeapPage pg = (HeapPage) pool.getPage(tid, pageid, Permissions.READ_WRITE);
+        pg.deleteTuple(t);
+        pages.add(pg);
+        return pages;
     }
 
     // see DbFile.java for javadocs

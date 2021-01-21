@@ -240,8 +240,18 @@ public class HeapPage implements Page {
      * @param t The tuple to delete
      */
     public void deleteTuple(Tuple t) throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        if(t.getRecordId().getPageId().equals(getId()))
+        {
+            int tup = t.getRecordId().getTupleNumber();
+            if(tup>=0 && tup < getNumTuples())
+            {
+                if(!isSlotUsed(tup))
+                    throw new DbException("Delete empty tuple!");
+                markSlotUsed(tup, false);
+                tuples[tup] = null;
+            }
+        }
+        else throw new DbException("No such Tuple!");
     }
 
     /**
@@ -252,8 +262,18 @@ public class HeapPage implements Page {
      * @param t The tuple to add.
      */
     public void insertTuple(Tuple t) throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        for(int tup=0; tup<getNumTuples(); ++tup)
+        {
+            if(!isSlotUsed(tup))
+            {
+                RecordId rec = new RecordId(getId(), tup);
+                t.setRecordId(rec);
+                tuples[tup] = t;
+                markSlotUsed(tup, true);
+                return;
+            }
+        }
+        throw new DbException("Page is full");
     }
 
     /**
@@ -299,8 +319,13 @@ public class HeapPage implements Page {
      * Abstraction to fill or clear a slot on this page.
      */
     private void markSlotUsed(int i, boolean value) {
-        // some code goes here
-        // not necessary for lab1
+        if (value) {
+            header[i>>3] |= (1<<(i&7));
+        }
+        else
+            {
+            header[i>>3] &= ~(1<<(i&7));
+        }
     }
 
     /**
