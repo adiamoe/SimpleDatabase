@@ -28,6 +28,7 @@ public class BufferPool {
     public static final int DEFAULT_PAGES = 50;
 
     private final Page[] pages;
+    private boolean[] clock;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -36,6 +37,7 @@ public class BufferPool {
      */
     public BufferPool(int numPages) {
         pages = new Page[numPages];
+        clock = new boolean[numPages];
     }
 
     public static int getPageSize() {
@@ -76,6 +78,8 @@ public class BufferPool {
             if (null == pages[i]) {
                 idx = i;
             } else if (pid.equals(pages[i].getId())) {
+                if(!clock[i])
+                    clock[i] = true;
                 return pages[i];
             }
         }
@@ -83,6 +87,8 @@ public class BufferPool {
             evictPage();
             return getPage(tid, pid, perm);
         } else {
+            if(!clock[idx])
+                clock[idx] = true;
             return pages[idx] = Database.getCatalog().getDatabaseFile
                     (pid.getTableId()).readPage(pid);
         }
@@ -180,8 +186,11 @@ public class BufferPool {
      *     break simpledb if running in NO STEAL mode.
      */
     public synchronized void flushAllPages() throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        for(int i=0; i<pages.length; ++i)
+        {
+            if(pages[i].isDirty() != null)
+                flushPage(pages[i].getId());
+        }
 
     }
 
@@ -194,8 +203,14 @@ public class BufferPool {
      are removed from the cache so they can be reused safely
      */
     public synchronized void discardPage(PageId pid) {
-        // some code goes here
-        // not necessary for lab1
+        for(int i=0; i<pages.length; ++i)
+        {
+            if(pages[i].getId().equals(pid))
+            {
+                pages[i] = null;
+                break;
+            }
+        }
     }
 
     /**
@@ -203,24 +218,55 @@ public class BufferPool {
      * @param pid an ID indicating the page to flush
      */
     private synchronized  void flushPage(PageId pid) throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        for (Page page : pages) {
+            if (pid.equals(page.getId())) {
+                TransactionId tid = page.isDirty();
+                if (tid != null) {
+                    page.markDirty(false, null);
+                    Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(page);
+                    return;
+                }
+            }
+        }
+        throw new IOException("Flush failed!");
     }
 
     /** Write all pages of the specified transaction to disk.
      */
     public synchronized  void flushPages(TransactionId tid) throws IOException {
-        // some code goes here
-        // not necessary for lab1|lab2
+        for (Page page : pages) {
+            if (page.isDirty().equals(tid))
+                flushPage(page.getId());
+        }
     }
 
     /**
      * Discards a page from the buffer pool.
      * Flushes the page to disk to ensure dirty pages are updated on disk.
      */
+    //clock Algorithm:遍历clock，将clock中的1置0，直到遇到第一个0，将对应的page删除
     private synchronized  void evictPage() throws DbException {
-        // some code goes here
-        // not necessary for lab1
+        for(int i=0; i<pages.length; ++i)
+        {
+            if(clock[i])
+            {
+                clock[i] = false;
+            }
+            else
+            {
+                try
+                {
+                    flushPage(pages[i].getId());
+                }
+                catch (IOException e)
+                {
+                    e.printStackTrace();
+                }
+                pages[i] = null;
+                return;
+            }
+        }
+
     }
 
 }
