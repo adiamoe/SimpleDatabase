@@ -83,7 +83,7 @@ public class HeapFile implements DbFile {
                 }
             }
         }
-        throw new IllegalArgumentException("no such page!");
+        throw new IllegalArgumentException("no such page for readPage!");
     }
 
     // see DbFile.java for javadocs
