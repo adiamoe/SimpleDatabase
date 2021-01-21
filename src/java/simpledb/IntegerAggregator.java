@@ -20,7 +20,7 @@ public class IntegerAggregator implements Aggregator {
     //根据不同字段分组对应的结果
     private HashMap<Field, Integer> Fie2Agg;
     //根据不同字段分组对应的数量,用于计算平均值
-    private HashMap<Field, Integer> Fie2Num;
+    private HashMap<Field, Integer[]> Fie2Num;
     private final Field dummy;
     /**
      * Aggregate constructor
@@ -81,19 +81,27 @@ public class IntegerAggregator implements Aggregator {
                 Fie2Agg.put(key, Fie2Agg.containsKey(key)? Fie2Agg.get(key)+1:1);
                 break;
             case AVG:
-                //计算平均值，需要计算字符出现的次数和对应数字的总和
+                //1-19:计算平均值，需要计算字符出现的次数和对应数字的总和
                 //对于每次输入，都计算现有所有数字的平均值
+
+                //1-21更正:一开始我通过每次计算平均值，在通过平均值和总数求总和通不过测试，
+                //类型转换会导致数据发生变化，需要储存count和sum两个变量
                 if(Fie2Agg.containsKey(key))
                 {
-                    int count = Fie2Num.get(key);
-                    int avg = (Fie2Agg.get(key) * count + value)/ (count+1);
+                    int count = Fie2Num.get(key)[0];
+                    int sum = Fie2Num.get(key)[1];
+                    count++;
+                    sum += value;
+                    Integer[] nums = new Integer[]{count, sum};
+                    int avg = sum/count;
                     Fie2Agg.put(key, avg);
-                    Fie2Num.put(key, count+1);
+                    Fie2Num.put(key, nums);
                 }
                 else
                 {
                     Fie2Agg.put(key, value);
-                    Fie2Num.put(key, 1);
+                    Integer[] nums = new Integer[]{1, value};
+                    Fie2Num.put(key, nums);
                 }
                 break;
         }
