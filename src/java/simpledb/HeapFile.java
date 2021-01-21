@@ -88,8 +88,25 @@ public class HeapFile implements DbFile {
 
     // see DbFile.java for javadocs
     public void writePage(Page page) throws IOException {
-        // some code goes here
-        // not necessary for lab1
+        if(page.getId().getTableId()==getId())
+        {
+            int pgNo = page.getId().getPageNumber();
+            if(pgNo>=0 && pgNo<numPages())
+            {
+                RandomAccessFile raf = new RandomAccessFile(file, "rw");
+                try
+                {
+                    raf.seek((long)BufferPool.getPageSize()*pgNo);
+                    raf.write(page.getPageData(), 0, BufferPool.getPageSize());
+                    return;
+                }
+                finally {
+                    raf.close();
+                }
+            }
+            throw new IllegalArgumentException("PageId out of range!");
+        }
+
     }
 
     /**
