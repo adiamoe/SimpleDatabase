@@ -48,10 +48,12 @@ public class RecordId implements Serializable {
      */
     @Override
     public boolean equals(Object o) {
+        if(o == this)
+            return true;
         if(o instanceof RecordId)
         {
             RecordId one = (RecordId) o;
-            return one.getPageId() == getPageId() && one.getTupleNumber() == getTupleNumber();
+            return one.getPageId().equals(getPageId()) && one.getTupleNumber() == getTupleNumber();
         }
         return false;
     }
@@ -64,9 +66,8 @@ public class RecordId implements Serializable {
      */
     @Override
     public int hashCode() {
-        // some code goes here
-        //todo: hashcode
-        throw new UnsupportedOperationException("implement this");
+        int result = 31 * page.hashCode() + tupleNumber;
+        return result;
 
     }
 

@@ -37,9 +37,7 @@ public class HeapPageId implements PageId {
      * @see BufferPool
      */
     public int hashCode() {
-        // some code goes here
-        //todo: hashcode
-        throw new UnsupportedOperationException("implement this");
+        return 31*getTableId() + getPageNumber();
     }
 
     /**
