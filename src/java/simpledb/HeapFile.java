@@ -91,7 +91,7 @@ public class HeapFile implements DbFile {
         if(page.getId().getTableId()==getId())
         {
             int pgNo = page.getId().getPageNumber();
-            if(pgNo>=0 && pgNo<numPages())
+            if(pgNo>=0 && pgNo<=numPages())
             {
                 RandomAccessFile raf = new RandomAccessFile(file, "rw");
                 try
