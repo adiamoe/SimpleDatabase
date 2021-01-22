@@ -28,7 +28,8 @@ public class BufferPool {
     public static final int DEFAULT_PAGES = 50;
 
     private final Page[] pages;
-    private boolean[] clock;
+    private final boolean[] clock;
+    private int clockPointer;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -38,6 +39,7 @@ public class BufferPool {
     public BufferPool(int numPages) {
         pages = new Page[numPages];
         clock = new boolean[numPages];
+        clockPointer = 0;
     }
 
     public static int getPageSize() {
@@ -246,7 +248,7 @@ public class BufferPool {
      */
     //clock Algorithm:遍历clock，将clock中的1置0，直到遇到第一个0，将对应的page删除
     private synchronized  void evictPage() throws DbException {
-        for(int i=0; i<pages.length; ++i)
+        for(int i=clockPointer; i<pages.length; ++i)
         {
             if(clock[i])
             {
@@ -262,6 +264,7 @@ public class BufferPool {
                 {
                     e.printStackTrace();
                 }
+                clockPointer = i;
                 pages[i] = null;
                 return;
             }
