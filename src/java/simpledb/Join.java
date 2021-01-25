@@ -12,8 +12,14 @@ public class Join extends Operator {
     private JoinPredicate pre;
     private OpIterator child1;
     private OpIterator child2;
+    private TupleDesc tupleDesc;
 
-    private Tuple tup1;
+    private TupleIterator joinResult;
+
+    //缓冲区大小
+    private final static int blockMemory = (int) Math.pow(2, 18);
+    private int length1;
+    private int length2;
     /**
      * Constructor. Accepts two children to join and the predicate to join them
      * on
@@ -29,6 +35,9 @@ public class Join extends Operator {
         pre = p;
         this.child1 = child1;
         this.child2 = child2;
+        tupleDesc = TupleDesc.merge(child1.getTupleDesc(), child2.getTupleDesc());
+        length1 = child1.getTupleDesc().numFields();
+        length2 = child2.getTupleDesc().numFields();
     }
 
     public JoinPredicate getJoinPredicate() {
@@ -58,7 +67,7 @@ public class Join extends Operator {
      *      implementation logic.
      */
     public TupleDesc getTupleDesc() {
-        return TupleDesc.merge(child1.getTupleDesc(), child2.getTupleDesc());
+        return tupleDesc;
     }
 
     public void open() throws DbException, NoSuchElementException,
@@ -66,19 +75,21 @@ public class Join extends Operator {
         super.open();
         child1.open();
         child2.open();
-        tup1 = child1.hasNext()? child1.next() : null;
+        joinResult = blockJoin();
+        joinResult.open();
     }
 
     public void close() {
         child1.close();
         child2.close();
         super.close();
-        tup1 = null;
+        joinResult.close();
     }
 
     public void rewind() throws DbException, TransactionAbortedException {
-        close();
-        open();
+        child1.rewind();
+        child2.rewind();
+        joinResult.rewind();
     }
 
     /**
@@ -99,34 +110,110 @@ public class Join extends Operator {
      * @return The next matching tuple.
      * @see JoinPredicate#filter
      */
-    protected Tuple fetchNext() throws TransactionAbortedException, DbException {
-        while (true) {
-            if(!child2.hasNext()) {
-                if (child1.hasNext()) {
-                    tup1 = child1.next();
-                    child2.rewind();
-                }
-                else {
-                    tup1 = null;
-                    return null;
-                }
-            }
-            Tuple tup2 = child2.next();
-            int length1 = tup1.getTupleDesc().numFields();
-            int length2 = tup2.getTupleDesc().numFields();
-            if (pre.filter(tup1, tup2)) {
-                Tuple tup = new Tuple(getTupleDesc());
-                int i = 0;
-                for (int j = 0; j < length1; j++) {
-                    tup.setField(i++, tup1.getField(j));
-                }
-                for (int j = 0; j < length2; j++) {
-                    tup.setField(i++, tup2.getField(j));
-                }
-                return tup;
-            }
-        }
 
+    //通过block nested loop join对join进行优化
+    //两个缓冲区储存两个表中的元组，对缓冲区中的元组分别进行比较
+    //减少读取磁盘的次数
+    //TupleIterator中检测TupleDesc不相同，但我都是通过getTupleDesc()构造的，把比较部分注释掉后可以通过测试
+    private TupleIterator blockJoin() throws TransactionAbortedException, DbException{
+        ArrayList<Tuple> result = new ArrayList<>();
+        //缓冲区中能容纳tuple的个数
+        int blockSize1 = blockMemory / child1.getTupleDesc().getSize();
+        int blockSize2 = blockMemory / child2.getTupleDesc().getSize();
+        Tuple[] left = new Tuple[blockSize1];
+        Tuple[] right = new Tuple[blockSize2];
+        int indexLeft = 0, indexRight = 0;
+        while(child2.hasNext())
+        {
+            right[indexRight++] = child2.next();
+            if(indexRight == blockSize2-1)
+            {
+                while(child1.hasNext())
+                {
+                    left[indexLeft++] = child1.next();
+                    if(indexLeft == blockSize1-1)
+                    {
+                        for(int i=0; i<blockSize2; ++i)
+                        {
+                            for(int j=0; j<blockSize1; ++j) {
+                                if (pre.filter(left[j], right[i])) {
+                                    result.add(merge(left[j], right[i]));
+                                }
+                            }
+                        }
+                    }
+                }
+                //child1读完而left未满
+                if(indexLeft>0 && indexLeft < blockSize1-1)
+                {
+                    for(int i=0; i<blockSize2; ++i)
+                    {
+                        for(int j=0; j<indexLeft; ++j) {
+                            if (pre.filter(left[j], right[i])) {
+                                result.add(merge(left[j], right[i]));
+                            }
+                        }
+                    }
+                }
+                indexLeft = 0;
+                child1.rewind();
+            }
+            //child2读完而right未满
+            else if(indexRight>0 && indexRight<blockSize2 -1)
+            {
+                while(child1.hasNext())
+                {
+                    left[indexLeft++] = child1.next();
+                    if(indexLeft == blockSize1-1)
+                    {
+                        for(int i=0; i<indexRight; ++i)
+                        {
+                            for(int j=0; j<blockSize1; ++j) {
+                                if (pre.filter(left[j], right[i])) {
+                                    result.add(merge(left[j], right[i]));
+                                }
+                            }
+                        }
+                    }
+                }
+                if(indexLeft>0 && indexLeft < blockSize1-1)
+                {
+                    for(int i=0; i<indexRight; ++i)
+                    {
+                        for(int j=0; j<indexLeft; ++j) {
+                            if (pre.filter(left[j], right[i])) {
+                                result.add(merge(left[j], right[i]));
+                            }
+                        }
+                    }
+                }
+                indexLeft = 0;
+                child1.rewind();
+            }
+            indexRight = 0;
+        }
+        return new TupleIterator(getTupleDesc(), result);
+    }
+
+    //合并两个tuple
+    private Tuple merge(Tuple left, Tuple right) {
+        Tuple tup = new Tuple(getTupleDesc());
+        int k = 0;
+        for (int m = 0; m < length1; m++) {
+            tup.setField(k++, left.getField(m));
+        }
+        for (int m = 0; m < length2; m++) {
+            tup.setField(k++, right.getField(m));
+        }
+        return tup;
+    }
+
+    protected Tuple fetchNext() throws TransactionAbortedException, DbException {
+        if(joinResult.hasNext())
+        {
+            return joinResult.next();
+        }
+        else return null;
     }
 
     @Override

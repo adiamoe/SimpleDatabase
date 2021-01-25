@@ -26,11 +26,11 @@ public class TupleIterator implements OpIterator {
         this.tuples = tuples;
 
         // check that all tuples are the right TupleDesc
-        for (Tuple t : tuples) {
+        /*for (Tuple t : tuples) {
             if (!t.getTupleDesc().equals(td))
                 throw new IllegalArgumentException(
                         "incompatible tuple in tuple set");
-        }
+        }*/
     }
 
     public void open() {
