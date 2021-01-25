@@ -31,13 +31,7 @@ public class TableStats {
             java.lang.reflect.Field statsMapF = TableStats.class.getDeclaredField("statsMap");
             statsMapF.setAccessible(true);
             statsMapF.set(null, s);
-        } catch (NoSuchFieldException e) {
-            e.printStackTrace();
-        } catch (SecurityException e) {
-            e.printStackTrace();
-        } catch (IllegalArgumentException e) {
-            e.printStackTrace();
-        } catch (IllegalAccessException e) {
+        } catch (NoSuchFieldException | IllegalAccessException | IllegalArgumentException | SecurityException e) {
             e.printStackTrace();
         }
 
@@ -66,6 +60,13 @@ public class TableStats {
      */
     static final int NUM_HIST_BINS = 100;
 
+    private int ioCostPerPage;
+    private DbFile table;
+    private int numTuples;
+    private int numPages;
+    private HashMap<Integer, IntHistogram> intHistograms;
+    private HashMap<Integer, StringHistogram> stringHistograms;
+
     /**
      * Create a new TableStats object, that keeps track of statistics on each
      * column of a table
@@ -84,7 +85,85 @@ public class TableStats {
         // You should try to do this reasonably efficiently, but you don't
         // necessarily have to (for example) do everything
         // in a single scan of the table.
-        // some code goes here
+        // Done
+        table = Database.getCatalog().getDatabaseFile(tableid);
+        intHistograms = new HashMap<>();
+        stringHistograms = new HashMap<>();
+        this.ioCostPerPage = ioCostPerPage;
+        numTuples = 0;
+        int numField = table.getTupleDesc().numFields();
+
+        DbFileIterator iter = table.iterator(new TransactionId());
+        HashMap<Integer, Integer> maxField = new HashMap<>();
+        HashMap<Integer, Integer> minField = new HashMap<>();
+        for(int i=0; i<numField; ++i)
+        {
+            if(table.getTupleDesc().getFieldType(i).equals(Type.INT_TYPE))
+            {
+                maxField.put(i, Integer.MIN_VALUE);
+                minField.put(i, Integer.MAX_VALUE);
+            }
+            else {
+                stringHistograms.put(i, new StringHistogram(NUM_HIST_BINS));
+            }
+        }
+        try
+        {
+            iter.open();
+            //获取每个attribute的最大最小值，用于构建histogram
+            while(iter.hasNext())
+            {
+                Tuple tup = iter.next();
+                for(int i=0; i<numField; ++i)
+                {
+                    IntField field = (IntField) tup.getField(i);
+                    int value = field.getValue();
+                    if(value > maxField.get(i))
+                        maxField.put(i, value);
+                    if(value < minField.get(i))
+                        minField.put(i, value);
+                }
+                numTuples++;
+            }
+            for(int i=0; i<numField; ++i)
+            {
+                //如果存在Field没有值
+                if(minField.get(i)>maxField.get(i))
+                    intHistograms.put(i ,new IntHistogram(NUM_HIST_BINS, Integer.MIN_VALUE, Integer.MAX_VALUE));
+                else
+                    intHistograms.put(i, new IntHistogram(NUM_HIST_BINS, minField.get(i), maxField.get(i)));
+            }
+            iter.rewind();
+            //重置iter，将每个tuple中的field存入对应的histogram
+            while(iter.hasNext())
+            {
+                Tuple tup = iter.next();
+                for(int i=0; i<numField; ++i)
+                {
+                    if(tup.getField(i).getType().equals(Type.INT_TYPE))
+                    {
+                        IntField field = (IntField) tup.getField(i);
+                        intHistograms.get(i).addValue(field.getValue());
+                    }
+                    else
+                    {
+                        StringField field = (StringField) tup.getField(i);
+                        stringHistograms.get(i).addValue(field.getValue());
+                    }
+                }
+            }
+        }
+        catch (Exception e)
+        {
+            e.printStackTrace();
+        }
+        finally {
+            iter.close();
+        }
+        //计算总共读取的page数
+        int pageSize = BufferPool.getPageSize();
+        numPages = (numTuples * table.getTupleDesc().getSize())/pageSize + 1;
+        //System.out.println(numTuples);
     }
 
     /**
@@ -100,8 +179,7 @@ public class TableStats {
      * @return The estimated cost of scanning the table.
      */
     public double estimateScanCost() {
-        // some code goes here
-        return 0;
+        return numPages*ioCostPerPage;
     }
 
     /**
@@ -114,8 +192,7 @@ public class TableStats {
      *         selectivityFactor
      */
     public int estimateTableCardinality(double selectivityFactor) {
-        // some code goes here
-        return 0;
+        return (int) (numTuples * selectivityFactor);
     }
 
     /**
@@ -129,8 +206,8 @@ public class TableStats {
      * expected selectivity. You may estimate this value from the histograms.
      * */
     public double avgSelectivity(int field, Predicate.Op op) {
-        // some code goes here
-        return 1.0;
+        // no need to implement
+        return 0.5;
     }
 
     /**
@@ -147,16 +224,19 @@ public class TableStats {
      *         predicate
      */
     public double estimateSelectivity(int field, Predicate.Op op, Field constant) {
-        // some code goes here
-        return 1.0;
+        if(stringHistograms.containsKey(field))
+        {
+            return stringHistograms.get(field).estimateSelectivity(op, ((StringField) constant).getValue());
+        }
+        else
+            return intHistograms.get(field).estimateSelectivity(op, ((IntField) constant).getValue());
     }
 
     /**
      * return the total number of tuples in this table
      * */
     public int totalTuples() {
-        // some code goes here
-        return 0;
+        return numTuples;
     }
 
 }
