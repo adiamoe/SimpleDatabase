@@ -17,7 +17,7 @@ public class Join extends Operator {
     private TupleIterator joinResult;
 
     //缓冲区大小
-    private final static int blockMemory = (int) Math.pow(2, 18);
+    public final static int blockMemory = (int) Math.pow(2, 18);
     private int length1;
     private int length2;
     /**

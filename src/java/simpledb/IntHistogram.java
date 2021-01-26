@@ -27,7 +27,7 @@ public class IntHistogram {
      * @param max The maximum integer value that will ever be passed to this class for histogramming
      */
     public IntHistogram(int buckets, int min, int max) {
-    	this.buckets = new int[buckets];
+    	this.buckets = new int[Math.min(buckets, max-min+1)];
     	this.min = min;
     	this.max = max;
     	num = 0;
