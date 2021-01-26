@@ -236,12 +236,26 @@ public class JoinOptimizer {
             throws ParsingException {
         //Not necessary for labs 1--3
 
-        // some code goes here
-        //Replace the following
+        /* pseudo code:
+        1. j = set of join nodes
+        2. for (i in 1...|j|):
+        3.     for s in {all length i subsets of j}
+        4.       bestPlan = {}
+        5.       for s' in {all length d-1 subsets of s}
+        6.            subplan = optjoin(s')
+        7.            plan = best way to join (s-s') to subplan
+        8.            if (cost(plan) < cost(bestPlan))
+        9.               bestPlan = plan
+        10.      optjoin(s) = bestPlan
+        11. return optjoin(j)
+         */
+
+        //Done
         int numNodes = joins.size();
         PlanCache pc = new PlanCache();
         for(int i=1; i<=numNodes; ++i)
         {
+            //取出对应数量的所有节点组合
             Set<Set<LogicalJoinNode>> nodes = enumerateSubsets(joins, i);
             for(Set<LogicalJoinNode> left:nodes)
             {
@@ -249,11 +263,13 @@ public class JoinOptimizer {
                 CostCard bestPlan = null;
                 for(LogicalJoinNode select:left)
                 {
+                    //将组合中的任意结点和之前获取的最佳排序join，计算出当前的最佳排序
                     CostCard plan = computeCostAndCardOfSubplan(stats, filterSelectivities, select, left,
                             bestPlan==null? Double.POSITIVE_INFINITY: bestPlan.cost, pc);
                     if(plan == null) {
                         continue;
                     }
+                    //更新最佳排序
                     else if(bestPlan == null||plan.cost < bestPlan.cost)
                         bestPlan = plan;
                 }
