@@ -111,9 +111,17 @@ public class JoinOptimizer {
             // HINT: You may need to use the variable "j" if you implemented
             // a join algorithm that's more complicated than a basic
             // nested-loops join.
-            //join中我使用的block nested join，可以减少磁盘扫描的次数
-            //但无法通过LogicalJoinNode获取对应的tableid，因此无法计算
-            return cost1 + card1* cost2 + card1 * card2;
+
+            return cost1 + card1 * cost2 + card1 * card2;
+            //join中我使用的block nested join，可以减少磁盘扫描的次数，但无法通过测试
+            /*int tableId1 = p.getTableId(j.t1Alias);
+            int tableId2 = p.getTableId(j.t2Alias);
+            Catalog catalog = Database.getCatalog();
+            TupleDesc td1 = catalog.getTupleDesc(tableId1);
+            TupleDesc td2 = catalog.getTupleDesc(tableId2);
+            int blockSize1 = Join.blockMemory / td1.getSize();
+            int blockSize2 = Join.blockMemory / td2.getSize();
+            return cost1 + (double) (card1/blockSize1) * (cost2/blockSize2) + card1 * card2;*/
         }
     }
 
@@ -230,7 +238,32 @@ public class JoinOptimizer {
 
         // some code goes here
         //Replace the following
-        return joins;
+        int numNodes = joins.size();
+        PlanCache pc = new PlanCache();
+        for(int i=1; i<=numNodes; ++i)
+        {
+            Set<Set<LogicalJoinNode>> nodes = enumerateSubsets(joins, i);
+            for(Set<LogicalJoinNode> left:nodes)
+            {
+                //对当前取的结点获取最优排序
+                CostCard bestPlan = null;
+                for(LogicalJoinNode select:left)
+                {
+                    CostCard plan = computeCostAndCardOfSubplan(stats, filterSelectivities, select, left,
+                            bestPlan==null? Double.POSITIVE_INFINITY: bestPlan.cost, pc);
+                    if(plan == null) {
+                        continue;
+                    }
+                    else if(bestPlan == null||plan.cost < bestPlan.cost)
+                        bestPlan = plan;
+                }
+                if(bestPlan != null)
+                    pc.addPlan(left, bestPlan.cost, bestPlan.card, bestPlan.plan);
+            }
+        }
+        if(explain)
+            printJoins(joins, pc, stats, filterSelectivities);
+        return pc.getOrder(new HashSet<>(joins));
     }
 
     // ===================== Private Methods =================================
@@ -308,7 +341,7 @@ public class JoinOptimizer {
             t2card = table2Alias == null ? 0 : stats.get(table2Name)
                     .estimateTableCardinality(
                             filterSelectivities.get(j.t2Alias));
-            rightPkey = table2Alias == null ? false : isPkey(table2Alias,
+            rightPkey = table2Alias != null && isPkey(table2Alias,
                     j.f2PureName);
         } else {
             // news is not empty -- figure best way to join j to news
@@ -336,7 +369,7 @@ public class JoinOptimizer {
                 t2card = j.t2Alias == null ? 0 : stats.get(table2Name)
                         .estimateTableCardinality(
                                 filterSelectivities.get(j.t2Alias));
-                rightPkey = j.t2Alias == null ? false : isPkey(j.t2Alias,
+                rightPkey = j.t2Alias != null && isPkey(j.t2Alias,
                         j.f2PureName);
             } else if (doesJoin(prevBest, j.t2Alias)) { // j.t2 is in prevbest
                                                         // (both
