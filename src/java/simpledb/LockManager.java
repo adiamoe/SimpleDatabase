@@ -15,7 +15,7 @@ public class LockManager {
     //事务锁住的page
     private final Map<TransactionId, List<PageId>> lockOfTransaction;
 
-    private LockManager()
+    public LockManager()
     {
         lockOnPage = new ConcurrentHashMap<>();
         waitForLock = new ConcurrentHashMap<>();
@@ -131,7 +131,13 @@ public class LockManager {
             return false;
         if(locks.remove(pid))
             lockOfTransaction.put(tid, locks);
-        return list.removeIf(s -> s.getId().equals(tid));
+        boolean flag = list.removeIf(s -> s.getId().equals(tid));
+        if(flag)
+        {
+            lockOnPage.put(pid, list);
+            return true;
+        }
+        return false;
     }
 
     public synchronized boolean releaseAllLock(TransactionId tid)
@@ -176,6 +182,12 @@ public class LockManager {
         if(locks.contains(waitfor))
             return true;
         return detectDeadLock(node, waitfor);
+    }
+
+    public boolean islock(TransactionId tid, PageId pid)
+    {
+        ArrayList<PageId> locks = (ArrayList<PageId>) lockOfTransaction.get(tid);
+        return locks.contains(pid);
     }
 
 }

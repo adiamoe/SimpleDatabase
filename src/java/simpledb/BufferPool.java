@@ -30,6 +30,8 @@ public class BufferPool {
     private final Page[] pages;
     private final boolean[] clock;
     private int clockPointer;
+    private LockManager lockManager;
+    private final int INTERVAL = 500;
 
     /**
      * Creates a BufferPool that caches up to numPages pages.
@@ -39,6 +41,7 @@ public class BufferPool {
     public BufferPool(int numPages) {
         pages = new Page[numPages];
         clock = new boolean[numPages];
+        lockManager = new LockManager();
         clockPointer = 0;
     }
 
@@ -72,8 +75,13 @@ public class BufferPool {
      * @param perm the requested permissions on the page
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
-            throws TransactionAbortedException, DbException {
-        //todo: 2021-1-13 如何设置权限？
+            throws TransactionAbortedException, DbException, InterruptedException {
+        while (!lockManager.requireLock(tid, pid, perm))
+        {
+            if(lockManager.detectDeadLock(tid, pid))
+                throw new TransactionAbortedException();
+            Thread.sleep(INTERVAL);
+        }
         int idx = -1;
 
         for (int i=0; i<pages.length; i++) {
@@ -106,8 +114,8 @@ public class BufferPool {
      * @param pid the ID of the page to unlock
      */
     public  void releasePage(TransactionId tid, PageId pid) {
-        // some code goes here
-        // not necessary for lab1|lab2
+        if(!lockManager.unlock(tid, pid))
+            throw new IllegalArgumentException("No lock");
     }
 
     /**
@@ -122,9 +130,7 @@ public class BufferPool {
 
     /** Return true if the specified transaction has a lock on the specified page */
     public boolean holdsLock(TransactionId tid, PageId p) {
-        // some code goes here
-        // not necessary for lab1|lab2
-        return false;
+        return lockManager.islock(tid, p);
     }
 
     /**
