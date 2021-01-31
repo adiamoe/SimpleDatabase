@@ -127,7 +127,6 @@ public class HeapFile implements DbFile {
             HeapPage pg = (HeapPage) pool.getPage(tid, new HeapPageId(tableId, pid), Permissions.READ_WRITE);
             if (pg != null && pg.getNumEmptySlots() > 0) {
                 pg.insertTuple(t);
-                pg.markDirty(true, tid);
                 pages.add(pg);
                 break;
             }
@@ -139,7 +138,6 @@ public class HeapFile implements DbFile {
             //通过bufferpool访问
             HeapPage pg = (HeapPage) pool.getPage(tid, newId, Permissions.READ_WRITE);
             pg.insertTuple(t);
-            pg.markDirty(true, tid);
             pages.add(pg);
         }
         return pages;
@@ -155,7 +153,6 @@ public class HeapFile implements DbFile {
             throw new DbException("No such tuple!");
         HeapPage pg = (HeapPage) pool.getPage(tid, pageid, Permissions.READ_WRITE);
         pg.deleteTuple(t);
-        pg.markDirty(true, tid);
         pages.add(pg);
         return pages;
     }

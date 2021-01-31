@@ -147,13 +147,13 @@ public class BufferPool {
      */
     public void transactionComplete(TransactionId tid, boolean commit)
             throws IOException {
-        if(!lockManager.releaseAllLock(tid))
-            throw new IllegalArgumentException("unlock failed");
+        lockManager.releaseAllLock(tid);
         if (commit) {
             flushPages(tid);
         }
-        else
+        else {
             revert(tid);
+        }
     }
 
     public void revert(TransactionId tid)
@@ -162,7 +162,7 @@ public class BufferPool {
         {
             if(pages[i]!=null && tid.equals(pages[i].isDirty()))
             {
-                pages[i] = null;
+                pages[i] = Database.getCatalog().getDatabaseFile(pages[i].getId().getTableId()).readPage(pages[i].getId());
             }
         }
     }
@@ -186,7 +186,8 @@ public class BufferPool {
             throws DbException, IOException, TransactionAbortedException {
         List<Page> pages = Database.getCatalog().getDatabaseFile(tableId).insertTuple(tid, t);
         for(Page pg: pages)
-            pg.markDirty(true, tid);
+            if(pg!=null)
+                pg.markDirty(true, tid);
     }
 
     /**
@@ -206,7 +207,8 @@ public class BufferPool {
             throws DbException, IOException, TransactionAbortedException {
         List<Page> pages = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId()).deleteTuple(tid, t);
         for(Page pg: pages)
-            pg.markDirty(true, tid);
+            if(pg!=null)
+                pg.markDirty(true, tid);
     }
 
     /**

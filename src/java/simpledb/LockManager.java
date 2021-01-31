@@ -12,14 +12,11 @@ public class LockManager {
     private final Map<PageId, ArrayList<LockState>> lockOnPage;
     //事务在等待的page
     private final Map<TransactionId, PageId> waitForLock;
-    //事务锁住的page
-    private final Map<TransactionId, ArrayList<PageId>> lockOfTransaction;
 
     public LockManager()
     {
         lockOnPage = new ConcurrentHashMap<>();
         waitForLock = new ConcurrentHashMap<>();
-        lockOfTransaction = new ConcurrentHashMap<>();
     }
 
     public synchronized boolean requireLock(TransactionId tid, PageId pid, Permissions perm)
@@ -109,17 +106,10 @@ public class LockManager {
     {
         LockState s = new LockState(tid, perm);
         ArrayList<LockState> list = lockOnPage.get(pid);
-        ArrayList<PageId> locks = lockOfTransaction.get(tid);
         if (list == null) {
             list = new ArrayList<>();
         }
-        if(locks == null)
-        {
-            locks = new ArrayList<>();
-        }
         list.add(s);
-        locks.add(pid);
-        lockOfTransaction.put(tid, locks);
         lockOnPage.put(pid, list);
         waitForLock.remove(tid);
         return true;
@@ -128,11 +118,8 @@ public class LockManager {
     public synchronized boolean unlock(TransactionId tid, PageId pid)
     {
         ArrayList<LockState> list = lockOnPage.get(pid);
-        ArrayList<PageId> locks = lockOfTransaction.get(tid);
         if(list == null)
             return true;
-        if(locks.remove(pid))
-            lockOfTransaction.put(tid, locks);
         boolean flag = list.removeIf(s -> s.getId().equals(tid));
         if(flag)
         {
@@ -142,26 +129,12 @@ public class LockManager {
         return false;
     }
 
-    public synchronized boolean releaseAllLock(TransactionId tid)
+    public synchronized void releaseAllLock(TransactionId tid)
     {
-        ArrayList<PageId> locks = lockOfTransaction.get(tid);
-        if(locks == null) {
-            return true;
+        ArrayList<PageId> toRelease = getAllLocksByTid(tid);
+        for (PageId pid : toRelease) {
+            unlock(tid, pid);
         }
-        for(PageId page:locks)
-        {
-            ArrayList<LockState> list = lockOnPage.get(page);
-            if(list == null)
-                return false;
-            boolean flag = list.removeIf(s -> tid.equals(s.getId()));
-            if(flag)
-                lockOnPage.put(page, list);
-            else {
-                return false;
-            }
-        }
-        lockOfTransaction.put(tid, new ArrayList<>());
-        return true;
     }
 
     //说明有事务在间接等待自己锁住的page
@@ -186,7 +159,7 @@ public class LockManager {
     //查询事务所等待的page，再从这些page出发重新搜索
     private synchronized boolean waitForPage(TransactionId end, TransactionId node)
     {
-        ArrayList<PageId> locks = lockOfTransaction.get(end);
+        ArrayList<PageId> locks = getAllLocksByTid(end);
         PageId waitfor = waitForLock.get(node);
         if(waitfor == null)
             return false;
@@ -198,7 +171,7 @@ public class LockManager {
 
     public boolean islock(TransactionId tid, PageId pid)
     {
-        ArrayList<PageId> locks = lockOfTransaction.get(tid);
+        ArrayList<PageId> locks = getAllLocksByTid(tid);
         return locks.contains(pid);
     }
 
