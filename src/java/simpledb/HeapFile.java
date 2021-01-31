@@ -123,24 +123,23 @@ public class HeapFile implements DbFile {
         ArrayList<Page> pages = new ArrayList<>();
         int tableId = getId();
         int pid = 0;
-        for(; pid<numPages();++pid)
-        {
+        for (; pid < numPages(); ++pid) {
             HeapPage pg = (HeapPage) pool.getPage(tid, new HeapPageId(tableId, pid), Permissions.READ_WRITE);
-            if(pg.getNumEmptySlots()>0)
-            {
+            if (pg != null && pg.getNumEmptySlots() > 0) {
                 pg.insertTuple(t);
+                pg.markDirty(true, tid);
                 pages.add(pg);
                 break;
             }
         }
-        if (pid == numPages())
-        {
+        if (pid == numPages()) {
             HeapPageId newId = new HeapPageId(tableId, pid);
             HeapPage newPage = new HeapPage(newId, HeapPage.createEmptyPageData());
             writePage(newPage);
             //通过bufferpool访问
             HeapPage pg = (HeapPage) pool.getPage(tid, newId, Permissions.READ_WRITE);
             pg.insertTuple(t);
+            pg.markDirty(true, tid);
             pages.add(pg);
         }
         return pages;
@@ -151,12 +150,12 @@ public class HeapFile implements DbFile {
             TransactionAbortedException {
         BufferPool pool = Database.getBufferPool();
         ArrayList<Page> pages = new ArrayList<>();
-        int tableId = getId();
         PageId pageid = t.getRecordId().getPageId();
         if(pageid.getPageNumber()>numPages())
             throw new DbException("No such tuple!");
         HeapPage pg = (HeapPage) pool.getPage(tid, pageid, Permissions.READ_WRITE);
         pg.deleteTuple(t);
+        pg.markDirty(true, tid);
         pages.add(pg);
         return pages;
     }

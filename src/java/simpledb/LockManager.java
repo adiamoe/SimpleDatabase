@@ -9,11 +9,11 @@ import java.util.concurrent.ConcurrentHashMap;
 public class LockManager {
 
     //每个page上锁的状态
-    private final Map<PageId, List<LockState>> lockOnPage;
+    private final Map<PageId, ArrayList<LockState>> lockOnPage;
     //事务在等待的page
     private final Map<TransactionId, PageId> waitForLock;
     //事务锁住的page
-    private final Map<TransactionId, List<PageId>> lockOfTransaction;
+    private final Map<TransactionId, ArrayList<PageId>> lockOfTransaction;
 
     public LockManager()
     {
@@ -29,7 +29,7 @@ public class LockManager {
 
     private synchronized boolean requireSLock(TransactionId tid, PageId pid)
     {
-        ArrayList<LockState> ls = (ArrayList<LockState>) lockOnPage.get(pid);
+        ArrayList<LockState> ls = lockOnPage.get(pid);
         //如果没有锁，直接加锁
         if(ls == null)
             return lock(tid, pid, Permissions.READ_ONLY);
@@ -76,7 +76,7 @@ public class LockManager {
 
     private synchronized boolean requireXLock(TransactionId tid, PageId pid)
     {
-        ArrayList<LockState> ls = (ArrayList<LockState>) lockOnPage.get(pid);
+        ArrayList<LockState> ls = lockOnPage.get(pid);
         if(ls == null)
             return lock(tid, pid, Permissions.READ_WRITE);
         int numLock = ls.size();
@@ -84,6 +84,7 @@ public class LockManager {
             return lock(tid, pid, Permissions.READ_WRITE);
         else if(numLock == 1)
         {
+            //如果是自己的写锁，返回；如果是自己的读锁，加上写锁后返回(Upgrade)，不是自己的锁则获取失败
             LockState s = ls.iterator().next();
             if(s.getId().equals(tid))
                 return s.getPerm() == Permissions.READ_WRITE || lock(tid, pid, Permissions.READ_WRITE);
@@ -98,6 +99,7 @@ public class LockManager {
                 if(s.getId().equals(tid) && s.getPerm() == Permissions.READ_WRITE)
                     return true;
             }
+            //说明有其他事务的锁，获取失败
             waitForLock.put(tid, pid);
             return false;
         }
@@ -106,8 +108,8 @@ public class LockManager {
     private synchronized boolean lock(TransactionId tid, PageId pid, Permissions perm)
     {
         LockState s = new LockState(tid, perm);
-        ArrayList<LockState> list = (ArrayList<LockState>) lockOnPage.get(pid);
-        ArrayList<PageId> locks = (ArrayList<PageId>) lockOfTransaction.get(tid);
+        ArrayList<LockState> list = lockOnPage.get(pid);
+        ArrayList<PageId> locks = lockOfTransaction.get(tid);
         if (list == null) {
             list = new ArrayList<>();
         }
@@ -125,8 +127,8 @@ public class LockManager {
 
     public synchronized boolean unlock(TransactionId tid, PageId pid)
     {
-        ArrayList<LockState> list = (ArrayList<LockState>) lockOnPage.get(pid);
-        ArrayList<PageId> locks = (ArrayList<PageId>) lockOfTransaction.get(tid);
+        ArrayList<LockState> list = lockOnPage.get(pid);
+        ArrayList<PageId> locks = lockOfTransaction.get(tid);
         if(list == null)
             return false;
         if(locks.remove(pid))
@@ -142,14 +144,19 @@ public class LockManager {
 
     public synchronized boolean releaseAllLock(TransactionId tid)
     {
-        ArrayList<PageId> locks = (ArrayList<PageId>) lockOfTransaction.get(tid);
+        ArrayList<PageId> locks = lockOfTransaction.get(tid);
+        if(locks == null)
+            return false;
         for(PageId page:locks)
         {
-            boolean flag;
-            flag = unlock(tid, page);
-            if(!flag)
+            ArrayList<LockState> list = lockOnPage.get(page);
+            if(list == null)
                 return false;
+            boolean flag = list.removeIf(s -> s.getId().equals(tid));
+            if(flag)
+                lockOnPage.put(page, list);
         }
+        lockOfTransaction.remove(tid);
         return true;
     }
 
@@ -157,7 +164,7 @@ public class LockManager {
     //从被锁住的page出发，检索拥有该page的事务
     public synchronized boolean detectDeadLock(TransactionId tid, PageId pid)
     {
-        ArrayList<LockState> ls = (ArrayList<LockState>) lockOnPage.get(pid);
+        ArrayList<LockState> ls = lockOnPage.get(pid);
         if(ls == null||ls.size() == 0)
             return false;
         for(LockState s:ls)
@@ -175,18 +182,18 @@ public class LockManager {
     //查询事务所等待的page，再从这些page出发重新搜索
     private synchronized boolean waitForPage(TransactionId end, TransactionId node)
     {
-        ArrayList<PageId> locks = (ArrayList<PageId>) lockOfTransaction.get(end);
+        ArrayList<PageId> locks = lockOfTransaction.get(end);
         PageId waitfor = waitForLock.get(node);
         if(waitfor == null)
             return false;
         if(locks.contains(waitfor))
             return true;
-        return detectDeadLock(node, waitfor);
+        return detectDeadLock(end, waitfor);
     }
 
     public boolean islock(TransactionId tid, PageId pid)
     {
-        ArrayList<PageId> locks = (ArrayList<PageId>) lockOfTransaction.get(tid);
+        ArrayList<PageId> locks = lockOfTransaction.get(tid);
         return locks.contains(pid);
     }
 

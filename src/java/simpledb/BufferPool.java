@@ -75,12 +75,18 @@ public class BufferPool {
      * @param perm the requested permissions on the page
      */
     public  Page getPage(TransactionId tid, PageId pid, Permissions perm)
-            throws TransactionAbortedException, DbException, InterruptedException {
-        while (!lockManager.requireLock(tid, pid, perm))
+            throws TransactionAbortedException, DbException {
+        try {
+            while (!lockManager.requireLock(tid, pid, perm))
+            {
+                if(lockManager.detectDeadLock(tid, pid))
+                    throw new TransactionAbortedException();
+                Thread.sleep(INTERVAL);
+            }
+        }
+        catch (InterruptedException e)
         {
-            if(lockManager.detectDeadLock(tid, pid))
-                throw new TransactionAbortedException();
-            Thread.sleep(INTERVAL);
+            e.printStackTrace();
         }
         int idx = -1;
 
@@ -113,7 +119,7 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      * @param pid the ID of the page to unlock
      */
-    public  void releasePage(TransactionId tid, PageId pid) {
+    public void releasePage(TransactionId tid, PageId pid) {
         if(!lockManager.unlock(tid, pid))
             throw new IllegalArgumentException("No lock");
     }
@@ -124,8 +130,7 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      */
     public void transactionComplete(TransactionId tid) throws IOException {
-        // some code goes here
-        // not necessary for lab1|lab2
+        transactionComplete(tid, true);
     }
 
     /** Return true if the specified transaction has a lock on the specified page */
@@ -142,8 +147,24 @@ public class BufferPool {
      */
     public void transactionComplete(TransactionId tid, boolean commit)
             throws IOException {
-        // some code goes here
-        // not necessary for lab1|lab2
+        if(!lockManager.releaseAllLock(tid))
+            throw new IllegalArgumentException("unlock failed");
+        if (commit) {
+            flushPages(tid);
+        }
+        else
+            revert(tid);
+    }
+
+    public void revert(TransactionId tid)
+    {
+        for(int i=0;i<pages.length; ++i)
+        {
+            if(pages[i]!=null && tid.equals(pages[i].isDirty()))
+            {
+                pages[i] = null;
+            }
+        }
     }
 
     /**
@@ -181,7 +202,7 @@ public class BufferPool {
      * @param tid the transaction deleting the tuple.
      * @param t the tuple to delete
      */
-    public  void deleteTuple(TransactionId tid, Tuple t)
+    public void deleteTuple(TransactionId tid, Tuple t)
             throws DbException, IOException, TransactionAbortedException {
         List<Page> pages = Database.getCatalog().getDatabaseFile(t.getRecordId().getPageId().getTableId()).deleteTuple(tid, t);
         for(Page pg: pages)
@@ -196,10 +217,13 @@ public class BufferPool {
     public synchronized void flushAllPages() throws IOException {
         for(int i=0; i<pages.length; ++i)
         {
-            if(pages[i].isDirty() != null)
-                flushPage(pages[i].getId());
+            if(pages[i]!=null && pages[i].isDirty() != null)
+            {
+                pages[i].markDirty(false, pages[i].isDirty());
+                Database.getCatalog().getDatabaseFile(pages[i].getId().getTableId()).writePage(pages[i]);
+                return;
+            }
         }
-
     }
 
     /** Remove the specific page id from the buffer pool.
@@ -226,14 +250,12 @@ public class BufferPool {
      * @param pid an ID indicating the page to flush
      */
     private synchronized  void flushPage(PageId pid) throws IOException {
+
         for (Page page : pages) {
-            if (pid.equals(page.getId())) {
-                TransactionId tid = page.isDirty();
-                if (tid != null) {
-                    page.markDirty(false, null);
-                    Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(page);
-                    return;
-                }
+            if (page!=null && pid.equals(page.getId())) {
+                page.markDirty(false, page.isDirty());
+                Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(page);
+                return;
             }
         }
         throw new IOException("Flush failed!");
@@ -241,9 +263,9 @@ public class BufferPool {
 
     /** Write all pages of the specified transaction to disk.
      */
-    public synchronized  void flushPages(TransactionId tid) throws IOException {
+    public synchronized void flushPages(TransactionId tid) throws IOException {
         for (Page page : pages) {
-            if (page.isDirty().equals(tid))
+            if (page!=null && tid.equals(page.isDirty()))
                 flushPage(page.getId());
         }
     }
@@ -253,29 +275,59 @@ public class BufferPool {
      * Flushes the page to disk to ensure dirty pages are updated on disk.
      */
     //clock Algorithm:遍历clock，将clock中的1置0，直到遇到第一个0，将对应的page删除
-    private synchronized  void evictPage() throws DbException {
-        for(int i=clockPointer; i<pages.length; ++i)
+    //NO STEAL:脏页不能被写入磁盘，因此指针指到的如果是脏页，继续搜索，如果全部是脏页，抛出异常
+    private synchronized void evictPage() throws DbException {
+        /*int i=0;
+        for(; i<pages.length; ++i)
         {
-            if(clock[i])
-            {
-                clock[i] = false;
-            }
-            else
+            if(pages[i].isDirty()==null)//&& !lockManager.islock(pages[i].getId()))
             {
                 try
                 {
                     flushPage(pages[i].getId());
+                    pages[i] = null;
+                    return;
                 }
                 catch (IOException e)
                 {
                     e.printStackTrace();
                 }
-                clockPointer = i;
-                pages[i] = null;
-                return;
             }
         }
-
+        if(i == pages.length)
+            throw new DbException("All pages are dirty!");*/
+        int k=0, count=0;
+        for(Page page:pages)
+        {
+            if(page.isDirty()!=null)
+                count++;
+        }
+        if(count == pages.length)
+            throw new DbException("All pages are dirty!");
+        for(int i=clockPointer;; ++i)
+        {
+            k = i % pages.length;
+            if(clock[k])
+            {
+                clock[k] = false;
+            }
+            else
+            {
+                try
+                {
+                    if(pages[k].isDirty()==null) {
+                        flushPage(pages[k].getId());
+                        clockPointer = k;
+                        pages[k] = null;
+                        return;
+                    }
+                }
+                catch (IOException e)
+                {
+                    e.printStackTrace();
+                }
+            }
+        }
     }
 
 }
