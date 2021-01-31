@@ -130,7 +130,7 @@ public class LockManager {
         ArrayList<LockState> list = lockOnPage.get(pid);
         ArrayList<PageId> locks = lockOfTransaction.get(tid);
         if(list == null)
-            return false;
+            return true;
         if(locks.remove(pid))
             lockOfTransaction.put(tid, locks);
         boolean flag = list.removeIf(s -> s.getId().equals(tid));
@@ -145,18 +145,22 @@ public class LockManager {
     public synchronized boolean releaseAllLock(TransactionId tid)
     {
         ArrayList<PageId> locks = lockOfTransaction.get(tid);
-        if(locks == null)
-            return false;
+        if(locks == null) {
+            return true;
+        }
         for(PageId page:locks)
         {
             ArrayList<LockState> list = lockOnPage.get(page);
             if(list == null)
                 return false;
-            boolean flag = list.removeIf(s -> s.getId().equals(tid));
+            boolean flag = list.removeIf(s -> tid.equals(s.getId()));
             if(flag)
                 lockOnPage.put(page, list);
+            else {
+                return false;
+            }
         }
-        lockOfTransaction.remove(tid);
+        lockOfTransaction.put(tid, new ArrayList<>());
         return true;
     }
 
@@ -186,8 +190,9 @@ public class LockManager {
         PageId waitfor = waitForLock.get(node);
         if(waitfor == null)
             return false;
-        if(locks.contains(waitfor))
+        if(locks.contains(waitfor)) {
             return true;
+        }
         return detectDeadLock(end, waitfor);
     }
 
@@ -195,6 +200,18 @@ public class LockManager {
     {
         ArrayList<PageId> locks = lockOfTransaction.get(tid);
         return locks.contains(pid);
+    }
+
+    private synchronized ArrayList<PageId> getAllLocksByTid(TransactionId tid) {
+        ArrayList<PageId> pids = new ArrayList<>();
+        for (Map.Entry<PageId, ArrayList<LockState>> entry : lockOnPage.entrySet()) {
+            for (LockState ls : entry.getValue()) {
+                if (ls.getId().equals(tid)) {
+                    pids.add(entry.getKey());
+                }
+            }
+        }
+        return pids;
     }
 
 }
