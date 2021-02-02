@@ -221,6 +221,8 @@ public class BufferPool {
         {
             if(pages[i]!=null && pages[i].isDirty() != null)
             {
+                Database.getLogFile().logWrite(pages[i].isDirty(), pages[i].getBeforeImage(), pages[i]);
+                Database.getLogFile().force();
                 pages[i].markDirty(false, pages[i].isDirty());
                 Database.getCatalog().getDatabaseFile(pages[i].getId().getTableId()).writePage(pages[i]);
                 return;
@@ -239,7 +241,7 @@ public class BufferPool {
     public synchronized void discardPage(PageId pid) {
         for(int i=0; i<pages.length; ++i)
         {
-            if(pages[i].getId().equals(pid))
+            if(pages[i]!=null && pid.equals(pages[i].getId()))
             {
                 pages[i] = null;
                 break;
@@ -255,6 +257,11 @@ public class BufferPool {
 
         for (Page page : pages) {
             if (page!=null && pid.equals(page.getId())) {
+                TransactionId dirtier = page.isDirty();
+                if (dirtier != null){
+                    Database.getLogFile().logWrite(dirtier, page.getBeforeImage(), page);
+                    Database.getLogFile().force();
+                }
                 page.markDirty(false, page.isDirty());
                 Database.getCatalog().getDatabaseFile(pid.getTableId()).writePage(page);
                 return;
@@ -267,8 +274,10 @@ public class BufferPool {
      */
     public synchronized void flushPages(TransactionId tid) throws IOException {
         for (Page page : pages) {
-            if (page!=null && tid.equals(page.isDirty()))
+            if (page!=null && tid.equals(page.isDirty())) {
                 flushPage(page.getId());
+                page.setBeforeImage();
+            }
         }
     }
 

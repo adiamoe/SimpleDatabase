@@ -105,7 +105,7 @@ public class LogFile {
         @param f The log file's name
     */
     public LogFile(File f) throws IOException {
-	this.logFile = f;
+	    this.logFile = f;
         raf = new RandomAccessFile(f, "rw");
         recoveryUndecided = true;
 
@@ -466,7 +466,32 @@ public class LogFile {
         synchronized (Database.getBufferPool()) {
             synchronized(this) {
                 preAppend();
-                // some code goes here
+                print();
+                long offset = tidToFirstLogRecord.get(tid.getId());
+                raf.seek(offset);
+                Stack<Long> stack = new Stack<>();
+                while(raf.getFilePointer() < raf.length())
+                {
+                    //获取每一条log记录，不同的记录对应不同的record
+                    LogRecord record = LogRecord.readNext(raf);
+                    if(record == null) //|| record instanceof AbortRecord && tid.getId() == record.getTid())
+                        break;
+                    if(record instanceof UpdateRecord && tid.getId() == record.getTid())
+                        stack.push(record.getOffset());
+                }
+                //逆序撤销所做的更新
+                while(!stack.empty())
+                {
+                    raf.seek(stack.pop());
+                    LogRecord record = LogRecord.readNext(raf);
+                    Page page = ((UpdateRecord) record).getBefore();
+                    //将更新前的页写入磁盘
+                    //因为在abort前可能进行了checkPoint，使得脏页被写入磁盘
+                    Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                    //丢掉缓存中的页
+                    Database.getBufferPool().discardPage(page.getId());
+                }
+
             }
         }
     }
@@ -500,7 +525,11 @@ public class LogFile {
 
     /** Print out a human readable represenation of the log */
     public void print() throws IOException {
-        // some code goes here
+        raf.seek(0);
+        while(raf.getFilePointer() < raf.length())
+        {
+            System.out.println(LogRecord.readNext(raf));
+        }
     }
 
     public  synchronized void force() throws IOException {
