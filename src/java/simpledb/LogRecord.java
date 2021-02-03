@@ -146,6 +146,11 @@ class CheckPointRecord extends LogRecord{
         offset = raf.readLong();
     }
 
+    public HashMap<Long, Long> getTidToFirstLogRecord()
+    {
+        return tidToFirstLogRecord;
+    }
+
     @Override
     public String toString()
     {

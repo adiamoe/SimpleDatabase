@@ -157,7 +157,6 @@ public class LogFile {
                 // must do this here, since rollback only works for
                 // live transactions (needs tidToFirstLogRecord)
                 rollback(tid);
-
                 raf.writeInt(ABORT_RECORD);
                 raf.writeLong(tid.getId());
                 raf.writeLong(currentOffset);
@@ -461,13 +460,57 @@ public class LogFile {
 
         @param tid The transaction to rollback
     */
+    //可以不用LogRecord实现，参照LogTruncate
+    //用LogRecord更加简洁
+    //2-3补充：本来undo的时候应该逆序重做，但由于update的实现是直接储存整页，因此可以直接取第一次更新前的页
     public void rollback(TransactionId tid)
         throws NoSuchElementException, IOException {
         synchronized (Database.getBufferPool()) {
             synchronized(this) {
                 preAppend();
-                print();
                 long offset = tidToFirstLogRecord.get(tid.getId());
+                raf.seek(offset);
+                //Stack<Long> stack = new Stack<>();
+                while(raf.getFilePointer() < raf.length())
+                {
+                    LogRecord record = LogRecord.readNext(raf);
+                    if(record == null) //|| record instanceof AbortRecord && tid.getId() == record.getTid())
+                        break;
+                    //获取第一次更新前的页
+                    if(record instanceof UpdateRecord && tid.getId() == record.getTid()) {
+                        //stack.push(record.getOffset());
+                        Page page = ((UpdateRecord) record).getBefore();
+                        Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                        Database.getBufferPool().discardPage(page.getId());
+                        tidToFirstLogRecord.remove(tid.getId());
+                        break;
+                    }
+                }
+                raf.seek(currentOffset);
+                //逆序撤销所做的更新
+                /*while(!stack.empty())
+                {
+                    raf.seek(stack.pop());
+                    LogRecord record = LogRecord.readNext(raf);
+                    Page page = ((UpdateRecord) record).getBefore();
+                    //将更新前的页写入磁盘
+                    //因为在abort前可能进行了checkPoint，使得脏页被写入磁盘
+                    Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                    //丢掉缓存中的页
+                    Database.getBufferPool().discardPage(page.getId());
+                }*/
+
+            }
+        }
+    }
+
+    //用于recover的undo，相比上面的rollback，采用了逆序undo的方法
+    public void rollback(Long tid)
+            throws NoSuchElementException, IOException {
+        synchronized (Database.getBufferPool()) {
+            synchronized(this) {
+                preAppend();
+                long offset = tidToFirstLogRecord.get(tid);
                 raf.seek(offset);
                 Stack<Long> stack = new Stack<>();
                 while(raf.getFilePointer() < raf.length())
@@ -476,8 +519,16 @@ public class LogFile {
                     LogRecord record = LogRecord.readNext(raf);
                     if(record == null) //|| record instanceof AbortRecord && tid.getId() == record.getTid())
                         break;
-                    if(record instanceof UpdateRecord && tid.getId() == record.getTid())
+                    //储存对应事务的更新记录
+                    if(record instanceof UpdateRecord && tid == record.getTid()) {
                         stack.push(record.getOffset());
+                        /*raf.seek(record.getOffset());
+                        LogRecord newrecord = LogRecord.readNext(raf);
+                        Page page = ((UpdateRecord) newrecord).getBefore();
+                        Database.getCatalog().getDatabaseFile(page.getId().getTableId()).writePage(page);
+                        Database.getBufferPool().discardPage(page.getId());
+                        break;*/
+                    }
                 }
                 //逆序撤销所做的更新
                 while(!stack.empty())
@@ -491,7 +542,6 @@ public class LogFile {
                     //丢掉缓存中的页
                     Database.getBufferPool().discardPage(page.getId());
                 }
-
             }
         }
     }
@@ -518,7 +568,98 @@ public class LogFile {
         synchronized (Database.getBufferPool()) {
             synchronized (this) {
                 recoveryUndecided = false;
-                // some code goes here
+                // Done
+                // 1.ANALYSIS PHASE
+                // 找到所有avtive的事务，获取最小的offset
+                // 可能存在没有checkPoint的情况
+                print();
+                raf.seek(0);
+                HashMap<Long, Long> tid2Offset = new HashMap<>();
+                long startOffset = raf.readLong();
+                HashMap<Long, List<PageId>> pageIds = new HashMap<>();
+                HashMap<PageId, Page> pages = new HashMap<>();
+                if(startOffset != -1L)
+                {
+                    raf.seek(startOffset);
+                    LogRecord recordForTid = LogRecord.readNext(raf);
+                    if (recordForTid instanceof CheckPointRecord)//&& recordForTid.getOffset() == startOffset)
+                    {
+                        tid2Offset = ((CheckPointRecord) recordForTid).getTidToFirstLogRecord();
+                    } else
+                        throw new IOException("CheckPoint pointer points wrong place!");
+                }
+
+                Set<Long> Tid = tid2Offset.keySet();
+                //将Tid和offset放入tidToFirstLogRecord，因为这些事务都在checkPoint之前开始
+                for(Long tid: Tid)
+                {
+                    tidToFirstLogRecord.put(tid, tid2Offset.get(tid));
+                    if(!pageIds.containsKey(tid))
+                        pageIds.put(tid, new ArrayList<>());
+                }
+
+                //2.REDO PHASE
+                //从checkPoint开始redo所有record
+                while(raf.getFilePointer() < raf.length())
+                {
+                    LogRecord newRecord = LogRecord.readNext(raf);
+                    if(newRecord == null)
+                        break;
+                    //update时先暂存页，就像在bufferPool一样
+                    if(newRecord instanceof UpdateRecord)
+                    {
+                        Page page = ((UpdateRecord) newRecord).getAfter();
+                        pages.put(page.getId(), page);
+                        pageIds.get(newRecord.getTid()).add(page.getId());
+                    }
+                    //begin时加入tidToFirstLogRecord
+                    if(newRecord instanceof BeginRecord)
+                    {
+                        tidToFirstLogRecord.put(newRecord.getTid(), newRecord.getOffset());
+                        pageIds.put(newRecord.getTid(), new ArrayList<>());
+                    }
+                    //abort时删除对应页和tid
+                    if(newRecord instanceof AbortRecord)
+                    {
+                        long tid = newRecord.getTid();
+                        tidToFirstLogRecord.remove(tid);
+                        ArrayList<PageId> list = (ArrayList<PageId>) pageIds.get(tid);
+                        pageIds.remove(tid);
+                        for(PageId id: list)
+                        {
+                            pages.remove(id);
+                        }
+                    }
+                    //commit时将对应事务的页写入磁盘
+                    if(newRecord instanceof CommitRecord)
+                    {
+                        long tid = newRecord.getTid();
+                        tidToFirstLogRecord.remove(tid);
+                        ArrayList<PageId> list = (ArrayList<PageId>) pageIds.get(tid);
+                        pageIds.remove(tid);
+                        for(PageId id: list)
+                        {
+                            Database.getCatalog().getDatabaseFile(id.getTableId()).writePage(pages.get(id));
+                            pages.get(id).setBeforeImage();
+                        }
+                    }
+                }
+
+                // undo Phase
+                // 添加ABORT_RECORD，rollback对应事务
+                currentOffset = raf.getFilePointer();
+                for(Long tid:tidToFirstLogRecord.keySet())
+                {
+                    raf.seek(currentOffset);
+                    raf.writeInt(ABORT_RECORD);
+                    raf.writeLong(tid);
+                    raf.writeLong(currentOffset);
+                    force();
+                    rollback(tid);
+                    currentOffset = raf.getFilePointer();
+                }
+                //全部事务都被提交或回滚
+                tidToFirstLogRecord.clear();
             }
          }
     }
