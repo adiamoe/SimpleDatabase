@@ -145,15 +145,17 @@ public class BufferPool {
      * @param tid the ID of the transaction requesting the unlock
      * @param commit a flag indicating whether we should commit or abort
      */
+    //steal no-force
+    //提交时不需要将页面写入磁盘，页面置空由abort进行
     public void transactionComplete(TransactionId tid, boolean commit)
             throws IOException {
         lockManager.releaseAllLock(tid);
-        if (commit) {
+        /*if (commit) {
             flushPages(tid);
         }
         else {
             revert(tid);
-        }
+        }*/
     }
 
     public void revert(TransactionId tid)
@@ -162,7 +164,7 @@ public class BufferPool {
         {
             if(pages[i]!=null && tid.equals(pages[i].isDirty()))
             {
-                pages[i] = Database.getCatalog().getDatabaseFile(pages[i].getId().getTableId()).readPage(pages[i].getId());
+                pages[i] = null;
             }
         }
     }
