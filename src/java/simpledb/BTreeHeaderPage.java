@@ -17,14 +17,14 @@ public class BTreeHeaderPage implements Page {
 	final static int INDEX_SIZE = Type.INT_TYPE.getLen();
 
 	final BTreePageId pid;
-	final byte header[];
+	final byte[] header;
 	final int numSlots;
 
 	private int nextPage; // next header page or 0
 	private int prevPage; // previous header page or 0
 
 	byte[] oldData;
-	private final Byte oldDataLock=new Byte((byte)0);
+	private final Byte oldDataLock= (byte) 0;
 
 	/**
 	 * Create a BTreeHeaderPage from a set of bytes of data read from disk.

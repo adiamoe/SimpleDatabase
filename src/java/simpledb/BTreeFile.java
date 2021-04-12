@@ -154,7 +154,7 @@ public class BTreeFile implements DbFile {
 			rf.close();
 		}
 		else {
-			rf.seek(BTreeRootPtrPage.getPageSize() + (page.getId().getPageNumber()-1) * BufferPool.getPageSize());
+			rf.seek(BTreeRootPtrPage.getPageSize() + (long) (page.getId().getPageNumber() - 1) * BufferPool.getPageSize());
 			rf.write(data);
 			rf.close();
 		}
@@ -194,8 +194,30 @@ public class BTreeFile implements DbFile {
 	private BTreeLeafPage findLeafPage(TransactionId tid, HashMap<PageId, Page> dirtypages, BTreePageId pid, Permissions perm,
 			Field f) 
 					throws DbException, TransactionAbortedException {
-		// some code goes here
-        return null;
+		switch (pid.pgcateg())
+		{
+			case BTreePageId.LEAF:
+				return (BTreeLeafPage) getPage(tid, dirtypages, pid, perm);
+			case BTreePageId.INTERNAL:
+				BTreeInternalPage page = (BTreeInternalPage) getPage(tid, dirtypages, pid, perm);
+				Iterator<BTreeEntry> iter = page.iterator();
+				if(iter == null || !iter.hasNext())
+					throw new DbException("No that Entry!");
+				if(f == null)
+					return findLeafPage(tid, dirtypages, iter.next().getLeftChild(), perm, f);
+				BTreeEntry entry = null;
+				while(iter.hasNext())
+				{
+					entry = iter.next();
+					if(entry.getKey().compare(Op.GREATER_THAN_OR_EQ, f))
+						return findLeafPage(tid, dirtypages, entry.getLeftChild(), perm, f);
+				}
+				return findLeafPage(tid, dirtypages, entry.getRightChild(), perm, f);
+			case BTreePageId.HEADER:
+			case BTreePageId.ROOT_PTR:
+			default:
+				throw new DbException("not valid page");
+		}
 	}
 	
 	/**
