@@ -281,7 +281,7 @@ public class BTreeFile implements DbFile {
 			rightPage.insertTuple(tuple);
 		}
 
-		//如果有右邻居
+		//如果有右邻居，更新它的指针
 		if(page.getRightSiblingId() != null)
 		{
 			BTreePageId oldRightId = page.getRightSiblingId();
@@ -659,6 +659,22 @@ public class BTreeFile implements DbFile {
         // Move some of the tuples from the sibling to the page so
 		// that the tuples are evenly distributed. Be sure to update
 		// the corresponding parent entry.
+
+		Iterator<Tuple> moveTuple = isRightSibling? sibling.iterator(): sibling.reverseIterator();
+		if(moveTuple==null || !moveTuple.hasNext())
+			throw new DbException("sibling has no tuple");
+
+		int numSteal = (sibling.getNumTuples() - page.getNumTuples())/2;
+		Tuple t = null;
+		for(int i=0; i<numSteal; ++i)
+		{
+			t = moveTuple.next();
+			sibling.deleteTuple(t);
+			page.insertTuple(t);
+		}
+		assert t != null;
+		entry.setKey(t.getField(keyField));
+		parent.updateEntry(entry);
 	}
 
 	/**
@@ -739,6 +755,24 @@ public class BTreeFile implements DbFile {
 		// that the entries are evenly distributed. Be sure to update
 		// the corresponding parent entry. Be sure to update the parent
 		// pointers of all children in the entries that were moved.
+
+		Iterator<BTreeEntry> moveEntry = leftSibling.reverseIterator();
+		//将parent的entry移动到page
+		BTreeEntry center = new BTreeEntry(parentEntry.getKey(), null, page.iterator().next().getLeftChild());
+
+		int numSteal = (leftSibling.getNumEntries() - page.getNumEntries())/2;
+		for(int i=0; i<numSteal; ++i)
+		{
+			BTreeEntry move = moveEntry.next();
+			leftSibling.deleteKeyAndRightChild(move);
+			center.setLeftChild(move.getRightChild());
+			page.insertEntry(center);
+			center = new BTreeEntry(move.getKey(), null, move.getRightChild());
+		}
+		parentEntry.setKey(center.getKey());
+		parent.updateEntry(parentEntry);
+		updateParentPointers(tid, dirtypages, page);
+
 	}
 	
 	/**
@@ -767,6 +801,22 @@ public class BTreeFile implements DbFile {
 		// that the entries are evenly distributed. Be sure to update
 		// the corresponding parent entry. Be sure to update the parent
 		// pointers of all children in the entries that were moved.
+
+		Iterator<BTreeEntry> moveEntry = rightSibling.iterator();
+		//将parent的entry移动到page
+		BTreeEntry center = new BTreeEntry(parentEntry.getKey(), page.reverseIterator().next().getRightChild(), null);
+		int numSteal = (rightSibling.getNumEntries() - page.getNumEntries())/2;
+		for(int i=0; i<numSteal; ++i)
+		{
+			BTreeEntry move = moveEntry.next();
+			rightSibling.deleteKeyAndLeftChild(move);
+			center.setRightChild(move.getLeftChild());
+			page.insertEntry(center);
+			center = new BTreeEntry(move.getKey(), move.getLeftChild(), null);
+		}
+		parentEntry.setKey(center.getKey());
+		parent.updateEntry(parentEntry);
+		updateParentPointers(tid, dirtypages, page);
 	}
 	
 	/**
